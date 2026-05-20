@@ -88,6 +88,7 @@ router.post('/', async (req, res) => {
     }
 
     const recipient  = process.env.CONTACT_RECIPIENT  || 'administracion@prodi.mx';
+    const cc         = process.env.CONTACT_CC;
     const senderName = process.env.CONTACT_SENDER_NAME || 'Sitio PRODI';
     const fromEmail  = `${senderName} <onboarding@resend.dev>`;
 
@@ -96,6 +97,7 @@ router.post('/', async (req, res) => {
     const { error } = await resend.emails.send({
       from:    fromEmail,
       to:      [recipient],
+      cc:      cc ? cc.split(',').map(e => e.trim()) : undefined,
       replyTo: email,
       subject: `Nuevo contacto: ${empresa || nombre}`,
       html:    buildHtml(data),
