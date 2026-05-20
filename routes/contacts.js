@@ -1,31 +1,9 @@
-import { Router }  from 'express';
-import nodemailer  from 'nodemailer';
+import { Router } from 'express';
+import { Resend } from 'resend';
 
 const router = Router();
 
-// ── Transporte SMTP (se crea una vez al cargar el módulo) ─────────────────────
-function buildTransport() {
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
-
-  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
-    console.warn('[contacts] ⚠️  SMTP no configurado — los correos no se enviarán.');
-    console.warn('           Define SMTP_HOST, SMTP_USER y SMTP_PASS en apps/backend/.env');
-    return null;
-  }
-
-  return nodemailer.createTransport({
-    host:   SMTP_HOST,
-    port:   parseInt(SMTP_PORT || '587', 10),
-    secure: parseInt(SMTP_PORT || '587', 10) === 465,
-    auth:   { user: SMTP_USER, pass: SMTP_PASS },
-    tls:    { rejectUnauthorized: false },   // evita errores de certificado
-    connectionTimeout: 10000,
-    greetingTimeout:   8000,
-    socketTimeout:     10000,
-  });
-}
-
-const transport = buildTransport();
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ── Helper: construye el HTML del correo ─────────────────────────────────────
 function buildHtml(c) {
@@ -104,39 +82,29 @@ router.post('/', async (req, res) => {
       });
     }
 
-    if (!transport) {
-      console.warn('[contacts] SMTP no configurado — correo no enviado.');
+    if (!process.env.RESEND_API_KEY) {
+      console.warn('[contacts] RESEND_API_KEY no configurada.');
       return res.status(503).json({ ok: false, error: 'Servicio de correo no configurado.' });
     }
 
-    const recipient   = process.env.CONTACT_RECIPIENT   || 'administracion@prodi.mx';
-    const cc          = process.env.CONTACT_CC;
-    const senderName  = process.env.CONTACT_SENDER_NAME || 'Sitio PRODI';
-    const senderEmail = process.env.CONTACT_SENDER_EMAIL || process.env.SMTP_USER;
+    const recipient  = process.env.CONTACT_RECIPIENT  || 'administracion@prodi.mx';
+    const senderName = process.env.CONTACT_SENDER_NAME || 'Sitio PRODI';
+    const fromEmail  = `${senderName} <onboarding@resend.dev>`;
 
     const data = { nombre, empresa, email, telefono, sector, tipo_proyecto, mensaje: mensaje || '' };
 
-    await transport.sendMail({
-      from:    `"${senderName}" <${senderEmail}>`,
-      to:      recipient,
-      cc:      cc || undefined,
+    const { error } = await resend.emails.send({
+      from:    fromEmail,
+      to:      [recipient],
       replyTo: email,
       subject: `Nuevo contacto: ${empresa || nombre}`,
       html:    buildHtml(data),
-      text: [
-        'Nuevo contacto desde el sitio PRODI',
-        '',
-        `Nombre:           ${nombre}`,
-        `Empresa:          ${empresa}`,
-        `Email:            ${email}`,
-        `Teléfono:         ${telefono}`,
-        `Sector:           ${sector}`,
-        `Tipo de proyecto: ${tipo_proyecto}`,
-        '',
-        'Mensaje:',
-        mensaje || '(sin mensaje)',
-      ].join('\n'),
     });
+
+    if (error) {
+      console.error('[contacts] ERROR Resend:', error);
+      return res.status(500).json({ ok: false, error: 'Error al enviar el correo.' });
+    }
 
     console.log(`[contacts] ✓ Correo enviado → ${recipient}`);
     res.status(200).json({ ok: true });
